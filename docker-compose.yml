@@ -1,0 +1,156 @@
+# ══════════════════════════════════════════════════════════════════════════════════════════
+#  SAMEC — stack completo
+#    nginx-samec        (8754) frontend Angular + orquestador: /samec-api/ → samec-core
+#    samec-core         (8753) core Quarkus (same_quarkus)
+#    email-service-samec        consume samec-email-topic y envía los correos
+#    kafka-samec        (9097) broker Kafka en modo KRaft (sin Zookeeper)
+#  La base de datos es externa: Oracle 19c (GCTIC) o PostgreSQL. Ver .env.example y README.md.
+#  Puertos y red elegidos para convivir en el mismo servidor con el stack de Auditorías
+#  (8743/8744/9095/2184, 192.168.210.0/24).
+#  Sin Ollama: SAMEC no usa IA. Si algún módulo la necesitara, copiar el servicio
+#  ollama-prod-audi del docker-compose de Auditorías (modelo qwen2.5:3b, mem_limit 3g).
+# ══════════════════════════════════════════════════════════════════════════════════════════
+name: samec
+
+services:
+  # KRaft: Kafka gestiona sus metadatos solo, sin el contenedor de Zookeeper que usa Auditorías
+  # (un servicio y ~512 MB menos). El heap va fijo por debajo del mem_limit: sin eso, la imagen
+  # reserva ~1 GB y el cgroup mata el proceso por OOM sin dejar un log claro.
+  kafka-samec:
+    image: confluentinc/cp-kafka:7.5.0
+    hostname: kafka-samec
+    container_name: kafka-samec
+    restart: unless-stopped
+    networks:
+      - samec-network
+    ports:
+      # Solo para desarrollo: el core en `mvn quarkus:dev` publica en localhost:9097.
+      - "9097:29092"
+    environment:
+      CLUSTER_ID: "3Xl0mdETS82t4vZmtHBcsQ"
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-samec:9092,EXTERNAL://localhost:9097
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-samec:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms512m"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 > /dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+      start_period: 30s
+
+  samec-core:
+    build:
+      context: ./same_quarkus
+      args:
+        # Se fija al compilar la imagen: oracle (GCTIC) | postgresql.
+        SAMEC_DB_KIND: ${SAMEC_DB_KIND:-oracle}
+    container_name: samec-core
+    restart: unless-stopped
+    networks:
+      - samec-network
+    # Publicado para desarrollo y diagnóstico. En producción conviene quitarlo para que todo el
+    # tráfico pase por Nginx (el core igual tiene su propio límite de solicitudes).
+    ports:
+      - "8753:8753"
+    depends_on:
+      kafka-samec:
+        condition: service_healthy
+    environment:
+      SAMEC_DB_URL: ${SAMEC_DB_URL:?Defina SAMEC_DB_URL en .env}
+      SAMEC_DB_USER: ${SAMEC_DB_USER:?Defina SAMEC_DB_USER en .env}
+      SAMEC_DB_PASSWORD: ${SAMEC_DB_PASSWORD:?Defina SAMEC_DB_PASSWORD en .env}
+      KAFKA_BOOTSTRAP_SERVERS: kafka-samec:9092
+      SAMEC_EMAIL_TOPIC: ${SAMEC_EMAIL_TOPIC:-samec-email-topic}
+      SAMEC_APP_URL: ${SAMEC_APP_URL:-http://localhost:8754}
+      SAMEC_CORS_ORIGINS: ${SAMEC_APP_URL:-http://localhost:8754}
+      SAMEC_COOKIE_SECURE: ${SAMEC_COOKIE_SECURE:-false}
+      SAMEC_RECAPTCHA_ENABLED: ${SAMEC_RECAPTCHA_ENABLED:-false}
+      SAMEC_RECAPTCHA_SECRET: ${SAMEC_RECAPTCHA_SECRET:-}
+      # Solo se acepta X-Real-IP de Nginx (esta red) y de localhost.
+      SAMEC_PROXIES_CONFIABLES: 127.0.0.1,::1,192.168.220.0/24
+      SAMEC_ADMIN_USERNAME: ${SAMEC_ADMIN_USERNAME:-}
+      SAMEC_ADMIN_EMAIL: ${SAMEC_ADMIN_EMAIL:-}
+      SAMEC_ADMIN_PASSWORD: ${SAMEC_ADMIN_PASSWORD:-}
+      TZ: America/Lima
+    volumes:
+      # Claves RSA de los JWT (scripts/generar-claves-jwt.sh). Solo lectura.
+      - ./secrets/jwt:/run/secrets/jwt:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8753/health > /dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # Mismo microservicio de correo que Auditorías (Exchange por defecto o Gmail API), con su
+  # propio tópico y grupo de consumidores.
+  email-service-samec:
+    build:
+      context: ./email
+    container_name: email-service-samec
+    restart: unless-stopped
+    networks:
+      - samec-network
+    depends_on:
+      kafka-samec:
+        condition: service_healthy
+    environment:
+      EMAIL_USERNAME: ${EMAIL_USERNAME:?Defina EMAIL_USERNAME (remitente) en .env}
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-exchange}
+      GMAIL_OAUTH_CLIENT_ID: ${GMAIL_OAUTH_CLIENT_ID:-}
+      GMAIL_OAUTH_CLIENT_SECRET: ${GMAIL_OAUTH_CLIENT_SECRET:-}
+      GMAIL_OAUTH_REFRESH_TOKEN: ${GMAIL_OAUTH_REFRESH_TOKEN:-}
+      KAFKA_BOOTSTRAP_SERVERS: kafka-samec:9092
+      SAMEC_EMAIL_TOPIC: ${SAMEC_EMAIL_TOPIC:-samec-email-topic}
+      SAMEC_EMAIL_GROUP: email-group-samec
+      TZ: America/Lima
+    mem_limit: 512m
+
+  nginx-samec:
+    build:
+      context: ./same_angular
+      args:
+        API_URL: /samec-api
+        RECAPTCHA_SITE_KEY: ${SAMEC_RECAPTCHA_SITE_KEY:-}
+        DOMINIO_CORREO: ${SAMEC_DOMINIO_CORREO:-essalud.gob.pe}
+    container_name: nginx-samec
+    restart: unless-stopped
+    networks:
+      - samec-network
+    ports:
+      - "8754:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      samec-core:
+        condition: service_healthy
+    mem_limit: 192m
+
+networks:
+  samec-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.220.0/24
+          gateway: 192.168.220.1
+
+volumes:
+  # Mensajes pendientes de Kafka: sobreviven a un reinicio del contenedor.
+  kafka-data:

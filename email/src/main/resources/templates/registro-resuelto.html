@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="es" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Solicitud de registro actualizada</title>
+</head>
+<body style="background:#F4F6F8;margin:0;padding:0;">
+    <table align="center" width="100%" cellpadding="0" cellspacing="0" style="max-width:500px;background:#fff;border-radius:8px;box-shadow:0 2px 8px #00579e22;margin-top:40px;">
+        <tr>
+            <td style="background:#00579e;padding:24px 0;text-align:center;border-radius:8px 8px 0 0;">
+                <img src="cid:logo_essalud_white.png" alt="EsSalud" width="120" style="margin-bottom:8px;">
+            </td>
+        </tr>
+        <tr>
+            <td style="padding:32px 24px 24px 24px;">
+                <h2 style="color:#00579e;margin-top:0;">Solicitud de registro actualizada</h2>
+                <p style="color:#333;font-size:16px;">
+                    Hola <b th:text="${nombre}">Nombre</b>, tu solicitud para registrarte como
+                    <b th:text="${rolLabel}">Evaluador interno</b> en SAMEC ha sido
+                    <b th:text="${estadoLabel}">aprobada</b>.
+                </p>
+                <p th:if="${aprobado}" style="color:#333;font-size:15px;">
+                    Ya puedes iniciar sesión con tu correo institucional y la contraseña que registraste.
+                </p>
+                <p th:if="${!aprobado}" style="color:#333;font-size:15px;">
+                    Si consideras que esto es un error, comunícate con el administrador del sistema.
+                </p>
+                <p th:if="${comentario != null and !comentario.isEmpty()}" style="color:#333;font-size:15px;background:#f8fafc;padding:12px 16px;border-radius:6px;">
+                    <b>Comentario:</b> <span th:text="${comentario}">—</span>
+                </p>
+                <p th:if="${aprobado}" style="text-align:center;margin:28px 0;">
+                    <a th:href="${appUrl} + '/auth/login'"
+                       style="background:#00579e;color:#fff;text-decoration:none;padding:12px 28px;border-radius:6px;font-size:15px;display:inline-block;">
+                        Iniciar sesión
+                    </a>
+                </p>
+                <p style="color:#888;font-size:13px;margin-top:32px;">Este correo fue generado automáticamente. No respondas a este mensaje.</p>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

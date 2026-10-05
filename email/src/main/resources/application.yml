@@ -1,0 +1,39 @@
+# application.yml
+spring:
+  mail:
+    host: mail.essalud.gob.pe
+    port: 25
+    test-connection: false
+    properties:
+      mail:
+        smtp:
+          auth: false
+          starttls:
+            enable: false
+          connectiontimeout: 10000
+          timeout: 10000
+          writetimeout: 10000
+  kafka:
+    consumer:
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka-samec:9092}
+      group-id: ${SAMEC_EMAIL_GROUP:email-group-samec}
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    listener:
+      missing-topics-fatal: false
+
+# Direccion remitente mostrada en los correos.
+# provider: "exchange" (por defecto, relay SMTP interno, no requiere credenciales)
+#           "gmail-api" (envio autenticado via Gmail API con OAuth2, aparece en Enviados,
+#            requiere client-id/client-secret/refresh-token generados una sola vez)
+app:
+  mail:
+    # Tópico que publica el core (same_quarkus): mp.messaging.outgoing.correos.topic
+    topic: ${SAMEC_EMAIL_TOPIC:samec-email-topic}
+    provider: ${MAIL_PROVIDER:exchange}
+    from: ${EMAIL_USERNAME}
+    gmail:
+      oauth-client-id: ${GMAIL_OAUTH_CLIENT_ID:}
+      oauth-client-secret: ${GMAIL_OAUTH_CLIENT_SECRET:}
+      oauth-refresh-token: ${GMAIL_OAUTH_REFRESH_TOKEN:}
+      application-name: EsSalud SAMEC Email Service

@@ -1,0 +1,15 @@
+# Credenciales y claves: nunca se versionan
+.env
+secrets/
+
+# Builds
+**/target/
+same_angular/node_modules/
+same_angular/dist/
+same_angular/.angular/
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+!same_angular/.vscode/
