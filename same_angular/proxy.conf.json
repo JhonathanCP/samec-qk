@@ -1,0 +1,8 @@
+{
+  "/samec-api": {
+    "target": "http://localhost:8753",
+    "secure": false,
+    "changeOrigin": true,
+    "pathRewrite": { "^/samec-api": "" }
+  }
+}
